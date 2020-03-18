@@ -1,8 +1,6 @@
 # Darknet with NNPACK
 NNPACK was used to optimize [AlexeyAB/darknet](https://github.com/AlexeyAB/darknet) without using a GPU. It is useful for embedded devices using ARM CPUs.
 
-## Build from Raspberry Pi 4
-Log in to Raspberry Pi using SSH.<br/>
 Install [PeachPy](https://github.com/Maratyszcza/PeachPy) and [confu](https://github.com/Maratyszcza/confu)
 ```
 sudo pip install --upgrade git+https://github.com/Maratyszcza/PeachPy
@@ -39,6 +37,10 @@ make
 ```
 
 ## Test
+```
+./darknet detector test cfg/voc.data cfg/yolov3-tiny.cfg yolov3-tiny.weights data/dog.jpg
+```
+
 COCO trained weights files can be downloaded from the [AlexeyAB/darknet](https://github.com/AlexeyAB/darknet).
 ```
 COCO

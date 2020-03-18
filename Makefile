@@ -1,7 +1,7 @@
 GPU=0
 CUDNN=0
 CUDNN_HALF=0
-OPENCV=0
+OPENCV=1
 AVX=0
 OPENMP=0
 LIBSO=0
@@ -12,7 +12,7 @@ NNPACK=1
 # set CUDNN_HALF=1 to further speedup 3 x times (Mixed-precision on Tensor Cores) GPU: Volta, Xavier, Turing and higher
 # set AVX=1 and OPENMP=1 to speedup on CPU (if error occurs then set AVX=0)
 
-USE_CPP=0
+USE_CPP=1
 DEBUG=0
 
 ARCH= -gencode arch=compute_30,code=sm_30 \

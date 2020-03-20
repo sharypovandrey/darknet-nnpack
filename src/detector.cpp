@@ -24,10 +24,11 @@ typedef __compar_fn_t comparison_fn_t;
 #include <memory>
 // OPenCV
 #include <opencv2/opencv.hpp>
-// #include <opencv2/tracking.hpp>
-// #include <opencv2/core/ocl.hpp>
+#include <opencv2/tracking.hpp>
+#include <opencv2/core/ocl.hpp>
 #include <iostream>
 
+using namespace cv;
 
 int check_mistakes = 0;
 
@@ -1624,12 +1625,12 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
 }
 
 
-extern "C" cv::Mat image_to_mat2(image img)
+extern "C" Mat image_to_mat2(image img)
 {
     int channels = img.c;
     int width = img.w;
     int height = img.h;
-    cv::Mat mat = cv::Mat(height, width, CV_8UC(channels));
+    Mat mat = Mat(height, width, CV_8UC(channels));
     int step = mat.step;
 
     for (int y = 0; y < img.h; ++y) {
@@ -1705,9 +1706,8 @@ extern "C" void track_detector(char *datacfg, char *cfgfile, char *weightfile, c
     // printf(output.slice(/*dim=*/1, /*start=*/0, /*end=*/5));
 
     // Tracker
-    // Ptr<TrackerKCF> tracker = TrackerKCF::create();
-    // tracker = TrackerKCF::create();
-    // printf("tracker is loaded\n"); 
+    Ptr<Tracker> tracker = TrackerKCF::create();
+    printf("tracker is loaded\n"); 
 
     while (1) {
         if (filename) {
@@ -1785,9 +1785,9 @@ extern "C" void track_detector(char *datacfg, char *cfgfile, char *weightfile, c
                         round(crop_w*im.w), 
                         round(crop_h*im.h));
 
-                cv::Mat cr_img = image_to_mat2(cropped_im);
-                cv::Mat sq_img;
-	            resize(cr_img, sq_img, cv::Size(64, 64), (0, 0), (0, 0), cv::INTER_LINEAR);
+                Mat cr_img = image_to_mat2(cropped_im);
+                Mat sq_img;
+	            resize(cr_img, sq_img, Size(64, 64), (0, 0), (0, 0), INTER_LINEAR);
                 sq_img.convertTo(sq_img, CV_32F, 1.0 / 255.0);
                 torch::TensorOptions option(torch::kFloat32);
                 at::Tensor img_tensor = torch::from_blob(sq_img.data, { 1, sq_img.channels(), sq_img.rows, sq_img.cols }, option);
@@ -1953,6 +1953,7 @@ void run_detector(int argc, char **argv)
             if (weights[strlen(weights) - 1] == 0x0d) weights[strlen(weights) - 1] = 0;
     char *filename = (argc > 6) ? argv[6] : 0;
     if (0 == strcmp(argv[2], "test")) test_detector(datacfg, cfg, weights, filename, thresh, hier_thresh, dont_show, ext_output, save_labels, outfile, letter_box, benchmark_layers);
+    else if (0 == strcmp(argv[2], "track")) track_detector(datacfg, cfg, weights, filename, thresh, hier_thresh, dont_show, ext_output, save_labels, outfile, letter_box, benchmark_layers);
     else if (0 == strcmp(argv[2], "train")) train_detector(datacfg, cfg, weights, gpus, ngpus, clear, dont_show, calc_map, mjpeg_port, show_imgs, benchmark_layers);
     else if (0 == strcmp(argv[2], "valid")) validate_detector(datacfg, cfg, weights, outfile);
     else if (0 == strcmp(argv[2], "recall")) validate_detector_recall(datacfg, cfg, weights);

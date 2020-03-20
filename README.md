@@ -42,7 +42,7 @@ make
 
 ## Test
 ```
-./darknet detector test cfg/voc.data cfg/yolov3-tiny.cfg yolov3-tiny.weights data/dog.jpg
+./darknet detector track cfg/voc.data cfg/yolov3-tiny.cfg yolov3-tiny.weights data/dog.jpg
 ```
 
 COCO trained weights files can be downloaded from the [AlexeyAB/darknet](https://github.com/AlexeyAB/darknet).

@@ -60,3 +60,4 @@ darknet-nnpack.*
 predictions.jpg
 
 libtorch/
+opencv_headers/

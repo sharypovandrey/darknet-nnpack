@@ -33,6 +33,10 @@ Build darknet-nnpack
 ```
 git clone https://github.com/digitalbrain79/darknet-nnpack.git
 cd darknet-nnpack
+wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-1.4.0%2Bcpu.zip
+sudo apt install unzip
+unzip libtorch-cxx11-abi-shared-with-deps-1.4.0+cpu.zip
+rm libtorch-cxx11-abi-shared-with-deps-1.4.0+cpu.zip
 make
 ```
 

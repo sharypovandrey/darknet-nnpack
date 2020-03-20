@@ -58,3 +58,5 @@ darknet
 
 darknet-nnpack.*
 predictions.jpg
+
+libtorch/

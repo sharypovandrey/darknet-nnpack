@@ -1,0 +1,48 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(gdb) demo",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/darknet",
+            "args": ["detector", "demo", "./cfg/coco.data", "./cfg/yolov3-tiny.cfg", "./yolov3-tiny.weights", "/home/hachi/Github/FollowMe/my_video.webm", "-i 0", "-thresh 0.25"],
+            "preLaunchTask": "make",
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "(gdb) test",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/darknet",
+            "args": ["detector", "track", "./cfg/coco.data", "./cfg/yolov3-tiny.cfg", "./yolov3-tiny.weights", "/home/hachi/Downloads/im.jpg"],
+            "preLaunchTask": "make",
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        }
+    ]
+}

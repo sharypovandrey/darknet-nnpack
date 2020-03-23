@@ -7,6 +7,11 @@
             "label": "make",
             "type": "shell",
             "command": "make"
+        },
+        {
+            "label": "cmake",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/torch_app/build/ && cmake --build . --config Debug"
         }
     ]
 }

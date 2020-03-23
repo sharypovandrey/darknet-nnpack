@@ -61,3 +61,4 @@ predictions.jpg
 
 libtorch/
 opencv_headers/
+torch_app/build/*

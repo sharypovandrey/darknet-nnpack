@@ -27,6 +27,7 @@ typedef __compar_fn_t comparison_fn_t;
 #include <opencv2/tracking.hpp>
 #include <opencv2/core/ocl.hpp>
 #include <iostream>
+#include <unistd.h>
 
 using namespace cv;
 
@@ -1625,12 +1626,12 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
 }
 
 
-extern "C" Mat image_to_mat2(image img)
+extern "C" cv::Mat image_to_mat2(image img)
 {
     int channels = img.c;
     int width = img.w;
     int height = img.h;
-    Mat mat = Mat(height, width, CV_8UC(channels));
+    cv::Mat mat = cv::Mat(height, width, CV_8UC(channels));
     int step = mat.step;
 
     for (int y = 0; y < img.h; ++y) {
@@ -1644,14 +1645,135 @@ extern "C" Mat image_to_mat2(image img)
     return mat;
 }
 
+extern "C" image mat_to_image2(cv::Mat mat)
+{
+    int w = mat.cols;
+    int h = mat.rows;
+    int c = mat.channels();
+    image im = make_image(w, h, c);
+    unsigned char *data = (unsigned char *)mat.data;
+    int step = mat.step;
+    for (int y = 0; y < h; ++y) {
+        for (int k = 0; k < c; ++k) {
+            for (int x = 0; x < w; ++x) {
+                //uint8_t val = mat.ptr<uint8_t>(y)[c * x + k];
+                //uint8_t val = mat.at<Vec3b>(y, x).val[k];
+                //im.data[k*w*h + y*w + x] = val / 255.0f;
+
+                im.data[k*w*h + y*w + x] = data[y*step + x*c + k] / 255.0f;
+            }
+        }
+    }
+    return im;
+}
+
+extern "C" cv::Mat crop_resize(cv::Mat frame)
+{
+    // Setup a rectangle to define your region of interest
+    cv::Rect myROI(80, 0, 480, 480);
+
+    // Crop the full image to that image contained by the rectangle myROI
+    // Note that this doesn't copy the data
+    cv::Mat croppedRef(frame, myROI);
+
+    cv::Mat cropped;
+    // Copy the data into new matrix
+    croppedRef.copyTo(cropped);
+
+    cv::Mat dst;
+    resize(cropped, dst, Size(416, 416), 0, 0, cv::INTER_CUBIC); // resize to 1024x768 resolution
+    
+    return dst;
+}
+
+extern "C" void get_owner_bbox(bool *is_found, Rect2d *bbox, cv::Mat *frame, network *net, torch::jit::script::Module *head_model, torch::jit::script::Module *tail_model, float thresh, float hier_thresh, float nms, char *names)
+{
+    image im = {frame->cols, frame->rows, 3, (float*)(frame->data)};
+    image sized = resize_image(im, net->w, net->h);
+    layer l = net->layers[net->n - 1];
+
+    float *X = sized.data;
+    network_predict(*net, X);
+  
+    int nboxes = 0;
+    detection *dets = get_network_boxes(net, im.w, im.h, thresh, hier_thresh, 0, 1, &nboxes, 0);
+    if (nms) {
+        if (l.nms_kind == DEFAULT_NMS) do_nms_sort(dets, nboxes, l.classes, nms);
+        else diounms_sort(dets, nboxes, l.classes, nms, l.nms_kind, l.beta_nms);
+    }
+
+    // draw_detections_v3(im, dets, nboxes, thresh, names, alphabet, l.classes, ext_output);
+
+    int selected_detections_num;
+    detection_with_class* selected_detections = get_actual_detections(dets, nboxes, thresh, &selected_detections_num, &names);
+
+    // text output
+    qsort(selected_detections, selected_detections_num, sizeof(*selected_detections), compare_by_lefts);
+    for (int i = 0; i < selected_detections_num; ++i) {
+        const int best_class = selected_detections[i].best_class;
+        if (&names[best_class] == "person")
+        {
+            int crop_x = selected_detections[i].det.bbox.x;
+            int crop_y = selected_detections[i].det.bbox.y;
+            int crop_w = selected_detections[i].det.bbox.w;
+            int crop_h = selected_detections[i].det.bbox.h;
+            
+            printf("%s: %.0f%%", &names[best_class], selected_detections[i].det.prob[best_class] * 100);
+            image cropped_im = crop_image(im,
+                    round((crop_x - crop_w / 2)*im.w),
+                    round((crop_y - crop_h / 2)*im.h),
+                    round(crop_w*im.w), 
+                    round(crop_h*im.h));
+
+            cv::Mat cr_img = image_to_mat2(cropped_im);
+            cv::Mat sq_img;
+            resize(cr_img, sq_img, Size(64, 64), (0, 0), (0, 0), cv::INTER_LINEAR);
+            sq_img.convertTo(sq_img, CV_32F, 1.0 / 255.0);
+            torch::TensorOptions option(torch::kFloat32);
+            at::Tensor current_input = torch::from_blob(sq_img.data, { 1, sq_img.channels(), sq_img.rows, sq_img.cols }, option);
+
+            // at::Tensor anchor_encoder = head_model.forward(anchor_input).toTensor();
+            at::Tensor anchor_encoder = head_model->forward({current_input}).toTensor();
+            at::Tensor current_encoder = head_model->forward({current_input}).toTensor();
+
+            at::Tensor distance = torch::abs(torch::sub(anchor_encoder, current_encoder));
+
+            at::Tensor y = tail_model->forward({distance}).toTensor();
+            y = torch::sigmoid(y);
+            float out = y[0].item().to<float>();
+            std::cout << out << '\n';
+
+            if (out > 0.5)
+            {
+                printf("matched");
+                *is_found = true;
+            } else {
+                printf("not matched");
+            };
+
+        }
+    }
+    free(selected_detections);
+    free_detections(dets, nboxes);
+    free_image(im);
+    free_image(sized);
+}
 
 extern "C" void track_detector(char *datacfg, char *cfgfile, char *weightfile, char *filename, float thresh,
     float hier_thresh, int dont_show, int ext_output, int save_labels, char *outfile, int letter_box, int benchmark_layers)
 {
+
+#define SSTR( x ) static_cast< std::ostringstream & >( ( std::ostringstream() << std::dec << x ) ).str()
+
     list *options = read_data_cfg(datacfg);
     char *name_list = option_find_str(options, "names", "data/names.list");
     int names_size = 0;
     char **names = get_labels_custom(name_list, &names_size); //get_labels(name_list);
+    char names_cpp[names_size];
+    for (int i = 0; i < names_size; i++)
+    {
+        names_cpp[i] = *names[i];
+    }
 
     image **alphabet = load_alphabet();
     network net = parse_network_cfg_custom(cfgfile, 1, 1); // set batch=1
@@ -1688,176 +1810,87 @@ extern "C" void track_detector(char *datacfg, char *cfgfile, char *weightfile, c
 #endif
 
     // Pytorch
-    torch::jit::script::Module module;
+    torch::jit::script::Module head_model;
+    torch::jit::script::Module tail_model;
     try {
         // Deserialize the ScriptModule from a file using torch::jit::load().
-        module = torch::jit::load("traced_resnet_model.pt");
+        head_model = torch::jit::load("/home/hachi/Github/darknet-nnpack/torch_app/traced_head.pt");
+        tail_model = torch::jit::load("/home/hachi/Github/darknet-nnpack/torch_app/traced_tail.pt");
     }
     catch (const c10::Error& e) {
-        printf("error loading the model\n");
+        printf("error loading the model");
+        exit(EXIT_FAILURE);
     }
 
     printf("pytorch modele is loaded\n");
 
-    std::vector<torch::jit::IValue> inputs;
-    inputs.push_back(torch::ones({1, 3, 224, 224}));
+    // cv::VideoCapture video("/home/hachi/Github/FollowMe/my_video.webm");
+    cv::VideoCapture video(0);
+    
+    // Exit if video is not opened
+    if(!video.isOpened())
+    {
+        printf("Could not read video file"); 
+        exit(EXIT_FAILURE);
+    } 
 
-    at::Tensor output = module.forward(inputs).toTensor();
-    // printf(output.slice(/*dim=*/1, /*start=*/0, /*end=*/5));
-
+    cv::Mat original_frame; 
+    bool res = video.read(original_frame); 
+    cv::Mat frame;
+    frame = crop_resize(original_frame);
+    
     // Tracker
-    Ptr<Tracker> tracker = TrackerKCF::create();
+    Ptr<Tracker> tracker = TrackerCSRT::create();
     printf("tracker is loaded\n"); 
 
-    while (1) {
-        if (filename) {
-            strncpy(input, filename, 256);
-            if (strlen(input) > 0)
-                if (input[strlen(input) - 1] == 0x0d) input[strlen(input) - 1] = 0;
-        }
-        else {
-            printf("Enter Image Path: ");
-            fflush(stdout);
-            input = fgets(input, 256, stdin);
-            if (!input) break;
-            strtok(input, "\n");
-        }
-        //image im;
-        //image sized = load_image_resize(input, net.w, net.h, net.c, &im);
-        image im = load_image(input, 0, 0, net.c);
-        image sized;
-        if(letter_box) sized = letterbox_image(im, net.w, net.h);
-        else sized = resize_image(im, net.w, net.h);
-        layer l = net.layers[net.n - 1];
+    printf("stay in front of the camera in two meters and wait for 3 sec. Don't move\n"); 
+    // we take the center of the image for initial user location
+    // usleep(3 * 1000000);
 
-        //box *boxes = calloc(l.w*l.h*l.n, sizeof(box));
-        //float **probs = calloc(l.w*l.h*l.n, sizeof(float*));
-        //for(j = 0; j < l.w*l.h*l.n; ++j) probs[j] = (float*)xcalloc(l.classes, sizeof(float));
+    Rect2d bbox( 
+        (int) (frame.cols / 3),
+        (int) (frame.rows * 0.1), 
+        (int) (frame.cols * 2 / 3),
+        (int) (frame.rows * 0.9)
+    );
 
-        float *X = sized.data;
+    tracker->init(frame, bbox);
+    bool ok;
+    bool is_found;
 
-        //time= what_time_is_it_now();
-        double time = get_time_point();
-        network_predict(net, X);
-        //network_predict_image(&net, im); letterbox = 1;
-        printf("%s: Predicted in %lf milli-seconds.\n", input, ((double)get_time_point() - time) / 1000);
-        //printf("%s: Predicted in %f seconds.\n", input, (what_time_is_it_now()-time));
+    while (video.isOpened()) {
+        double timer = (double)cv::getTickCount();
 
-        int nboxes = 0;
-        detection *dets = get_network_boxes(&net, im.w, im.h, thresh, hier_thresh, 0, 1, &nboxes, letter_box);
-        if (nms) {
-            if (l.nms_kind == DEFAULT_NMS) do_nms_sort(dets, nboxes, l.classes, nms);
-            else diounms_sort(dets, nboxes, l.classes, nms, l.nms_kind, l.beta_nms);
-        }
-        // for (int i = 0; i < dets->size; i++)
-        // {
-        //     printf(dets[i]);
-        // }
-        draw_detections_v3(im, dets, nboxes, thresh, names, alphabet, l.classes, ext_output);
+        // take a frame and resize it
+        res = video.read(original_frame); 
+        frame = crop_resize(original_frame);
+        
+        // track
+        ok = tracker->update(frame, bbox);
 
-        int selected_detections_num;
-        detection_with_class* selected_detections = get_actual_detections(dets, nboxes, thresh, &selected_detections_num, names);
-
-        // text output
-        qsort(selected_detections, selected_detections_num, sizeof(*selected_detections), compare_by_lefts);
-        for (int i = 0; i < selected_detections_num; ++i) {
-            const int best_class = selected_detections[i].best_class;
-            if (names[best_class] == "person")
-            {
-                int crop_x = selected_detections[i].det.bbox.x;
-                int crop_y = selected_detections[i].det.bbox.y;
-                int crop_w = selected_detections[i].det.bbox.w;
-                int crop_h = selected_detections[i].det.bbox.h;
-                
-                // if ( (crop_h / crop_w) > 2.0) {
-                //     // TODO: check cropping
-                // } else if ( (crop_h / crop_w) > 2.0) {
-
-                // } else {
-
-                // }
-
-
-                printf("%s: %.0f%%", names[best_class], selected_detections[i].det.prob[best_class] * 100);
-                image cropped_im = crop_image(im,
-                        round((crop_x - crop_w / 2)*im.w),
-                        round((crop_y - crop_h / 2)*im.h),
-                        round(crop_w*im.w), 
-                        round(crop_h*im.h));
-
-                Mat cr_img = image_to_mat2(cropped_im);
-                Mat sq_img;
-	            resize(cr_img, sq_img, Size(64, 64), (0, 0), (0, 0), INTER_LINEAR);
-                sq_img.convertTo(sq_img, CV_32F, 1.0 / 255.0);
-                torch::TensorOptions option(torch::kFloat32);
-                at::Tensor img_tensor = torch::from_blob(sq_img.data, { 1, sq_img.channels(), sq_img.rows, sq_img.cols }, option);
-            	at::Tensor result = module.forward({ img_tensor }).toTensor();//result different from python 
-            	// module.save_template({ img_tensor });//result different from python 
-                // if (torch::ones({1, 1}) == result) printf("same person");
-            }
-        }
-
-        free(selected_detections);
-
-        save_image(im, "predictions");
-        if (!dont_show) {
-            show_image(im, "predictions");
-        }
-
-        if (json_file) {
-            if (json_buf) {
-                char *tmp = ", \n";
-                fwrite(tmp, sizeof(char), strlen(tmp), json_file);
-            }
-            ++json_image_id;
-            json_buf = detection_to_json(dets, nboxes, l.classes, names, json_image_id, input);
-
-            fwrite(json_buf, sizeof(char), strlen(json_buf), json_file);
-            free(json_buf);
-        }
-
-        // pseudo labeling concept - fast.ai
-        if (save_labels)
+        if (ok)
         {
-            char labelpath[4096];
-            replace_image_to_label(input, labelpath);
-
-            FILE* fw = fopen(labelpath, "wb");
-            int i;
-            for (i = 0; i < nboxes; ++i) {
-                char buff[1024];
-                int class_id = -1;
-                float prob = 0;
-                for (j = 0; j < l.classes; ++j) {
-                    if (dets[i].prob[j] > thresh && dets[i].prob[j] > prob) {
-                        prob = dets[i].prob[j];
-                        class_id = j;
-                    }
-                }
-                if (class_id >= 0) {
-                    sprintf(buff, "%d %2.4f %2.4f %2.4f %2.4f\n", class_id, dets[i].bbox.x, dets[i].bbox.y, dets[i].bbox.w, dets[i].bbox.h);
-                    fwrite(buff, sizeof(char), strlen(buff), fw);
-                }
+            is_found = false;
+            get_owner_bbox(&is_found, &bbox, &frame, &net, &head_model, &tail_model, thresh, hier_thresh, nms, names_cpp);
+            if (is_found)
+            {
+                tracker->init(frame, bbox);
             }
-            fclose(fw);
+        } else {
+            // still tracks the goal successfully
+            float center_distance = (frame.cols / 2) - ( (bbox.width / 2 ) + bbox.x);
+            // std::cout << "bbox size " << bbox.x << " " << bbox.width << " " << bbox.y << " " << bbox.height << " dis: " << center_distance << std::endl;
+            if ( center_distance > 0 )
+            {
+                std::cout << "turn right" << std::endl;
+            } else {
+                std::cout << "turn left" << std::endl;
+            }
         }
 
-        free_detections(dets, nboxes);
-        free_image(im);
-        free_image(sized);
-
-        if (!dont_show) {
-            wait_until_press_key_cv();
-            destroy_all_windows_cv();
-        }
-
-        if (filename) break;
-    }
-
-    if (json_file) {
-        char *tmp = "\n]";
-        fwrite(tmp, sizeof(char), strlen(tmp), json_file);
-        fclose(json_file);
+        // show FPS
+        float fps = cv::getTickFrequency() / ((double)cv::getTickCount() - timer);
+        std::cout << "FPS : "  << fps << std::endl;
     }
 
     // free memory

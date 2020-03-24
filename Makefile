@@ -13,7 +13,7 @@ NNPACK=1
 # set AVX=1 and OPENMP=1 to speedup on CPU (if error occurs then set AVX=0)
 
 USE_CPP=1
-DEBUG=0
+DEBUG=1
 
 ARCH= -gencode arch=compute_30,code=sm_30 \
       -gencode arch=compute_35,code=sm_35 \
@@ -63,13 +63,13 @@ endif
 CPP=g++
 NVCC=nvcc
 OPTS=-Ofast
-LDFLAGS= -lm -pthread
-COMMON= -Iinclude/ -I3rdparty/stb/include -std=c++14 -Ilibtorch/include -std=c++11 -Iopencv_headers/include/opencv4
-CFLAGS=-Wall -Wfatal-errors -Wno-unused-result -Wno-unknown-pragmas -fPIC
+LDFLAGS= -lm -pthread  -lcaffe2_protos -lc10d -lbenchmark -lbenchmark_main -lcpuinfo -lcpuinfo_internals -lfbgemm -lpytorch_qnnpack -lnnpack -ltorch -lcaffe2_detectron_ops -lc10 -lpytorch_jni
+COMMON= -Iinclude/ -I3rdparty/stb/include -std=c++11 -Iopencv_headers/include/opencv4 -std=c++14 -Ilibtorch/include 
+CFLAGS=-Wall -Wfatal-errors -Wno-unused-result -Wno-unknown-pragmas -fPIC -Llibtorch/lib 
 
 ifeq ($(DEBUG), 1)
-#OPTS= -O0 -g
-#OPTS= -Og -g
+OPTS= -O0 -g
+# OPTS= -Og -g
 COMMON+= -DDEBUG
 CFLAGS+= -DDEBUG
 else

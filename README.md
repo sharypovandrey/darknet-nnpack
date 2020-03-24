@@ -31,7 +31,7 @@ sudo cp deps/pthreadpool/include/pthreadpool.h /usr/include/
 ```
 Build darknet-nnpack
 ```
-git clone https://github.com/digitalbrain79/darknet-nnpack.git
+git clone https://github.com/sharypovandrey/darknet-nnpack.git
 cd darknet-nnpack
 wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-1.4.0%2Bcpu.zip
 sudo apt install unzip

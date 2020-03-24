@@ -29,7 +29,27 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/darknet",
-            "args": ["detector", "track", "./cfg/coco.data", "./cfg/yolov3-tiny.cfg", "./yolov3-tiny.weights", "/home/hachi/Downloads/im.jpg"],
+            "args": ["detector", "test", "./cfg/coco.data", "./cfg/yolov3-tiny.cfg", "./yolov3-tiny.weights", "/home/hachi/Downloads/img.jpg"],
+            "preLaunchTask": "make",
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "(gdb) track",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/darknet",
+            "args": ["detector", "track", "./cfg/coco.data", "./cfg/yolov3-tiny.cfg", "./yolov3-tiny.weights"],
             "preLaunchTask": "make",
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
@@ -66,3 +86,4 @@
         }
     ]
 }
+// ./darknet detector track ./cfg/coco.data ./cfg/yolov3-tiny.cfg ./yolov3-tiny.weights

@@ -1789,19 +1789,19 @@ extern "C" void track_detector(char *datacfg, char *cfgfile, char *weightfile, c
         if (net.layers[net.n - 1].classes > names_size) getchar();
     }
     srand(2222222);
-    char buff[256];
-    char *input = buff;
-    char *json_buf = NULL;
-    int json_image_id = 0;
-    FILE* json_file = NULL;
-    if (outfile) {
-        json_file = fopen(outfile, "wb");
-        if(!json_file) {
-          error("fopen failed");
-        }
-        char *tmp = "[\n";
-        fwrite(tmp, sizeof(char), strlen(tmp), json_file);
-    }
+    // char buff[256];
+    // char *input = buff;
+    // char *json_buf = NULL;
+    // int json_image_id = 0;
+    // FILE* json_file = NULL;
+    // if (outfile) {
+    //     json_file = fopen(outfile, "wb");
+    //     if(!json_file) {
+    //       error("fopen failed");
+    //     }
+    //     char *tmp = "[\n";
+    //     fwrite(tmp, sizeof(char), strlen(tmp), json_file);
+    // }
     int j;
     float nms = .45;    // 0.4F
 #ifdef NNPACK
@@ -1848,12 +1848,27 @@ extern "C" void track_detector(char *datacfg, char *cfgfile, char *weightfile, c
     // usleep(3 * 1000000);
 
     Rect2d bbox( 
-        (int) (frame.cols / 3),
-        (int) (frame.rows * 0.1), 
-        (int) (frame.cols * 2 / 3),
+        (int) (frame.cols / 2 - frame.rows * 0.9 / 2 / 2),
+        (int) (frame.rows / 2 - frame.rows * 0.9 / 2), 
+        (int) (frame.cols * 0.9 / 2),
         (int) (frame.rows * 0.9)
     );
 
+    // Create anchor encoder
+    image im = {frame.cols, frame.rows, 3, (float*)(frame.data)};
+    image cropped_im = crop_image(im, bbox.x, bbox.y, bbox.width, bbox.height);
+
+    cv::Mat cr_img = image_to_mat2(cropped_im);
+    cv::Mat sq_img;
+    resize(cr_img, sq_img, Size(64, 64), (0, 0), (0, 0), cv::INTER_LINEAR);
+    // sq_img.convertTo(sq_img, CV_32F, 1.0 / 255.0);
+    torch::TensorOptions option(torch::kFloat32);
+    at::Tensor anchor_input = torch::from_blob(sq_img.data, { 1, sq_img.channels(), sq_img.rows, sq_img.cols }, option);
+    auto normalized_anchor = anchor_input.sub(torch::tensor({0.485, 0.456, 0.406})).div(torch::tensor({0.229, 0.224, 0.225}));
+
+    // at::Tensor anchor_encoder = head_model.forward(anchor_input).toTensor();
+    at::Tensor anchor_encoder = head_model.forward({normalized_anchor}).toTensor();
+    
     tracker->init(frame, bbox);
     bool ok;
     bool is_found;
@@ -1871,7 +1886,78 @@ extern "C" void track_detector(char *datacfg, char *cfgfile, char *weightfile, c
         if (ok)
         {
             is_found = false;
-            get_owner_bbox(&is_found, &bbox, &frame, &net, &head_model, &tail_model, thresh, hier_thresh, nms, names_cpp);
+            // get_owner_bbox(&is_found, &bbox, &frame, &net, &head_model, &tail_model, thresh, hier_thresh, nms, names_cpp);
+            
+            
+            image im = {frame.cols, frame.rows, 3, (float*)(frame.data)};
+            image sized = resize_image(im, net.w, net.h);
+            layer l = net.layers[net.n - 1];
+
+            float *X = sized.data;
+            network_predict(net, X);
+        
+            int nboxes = 0;
+            detection *dets = get_network_boxes(&net, im.w, im.h, thresh, hier_thresh, 0, 1, &nboxes, 0);
+            if (nms) {
+                if (l.nms_kind == DEFAULT_NMS) do_nms_sort(dets, nboxes, l.classes, nms);
+                else diounms_sort(dets, nboxes, l.classes, nms, l.nms_kind, l.beta_nms);
+            }
+
+            // draw_detections_v3(im, dets, nboxes, thresh, names, alphabet, l.classes, ext_output);
+
+            int selected_detections_num;
+            detection_with_class* selected_detections = get_actual_detections(dets, nboxes, thresh, &selected_detections_num, names);
+
+            // text output
+            qsort(selected_detections, selected_detections_num, sizeof(*selected_detections), compare_by_lefts);
+            for (int i = 0; i < selected_detections_num; ++i) {
+                const int best_class = selected_detections[i].best_class;
+                if (names[best_class] == "person")
+                {
+                    int crop_x = selected_detections[i].det.bbox.x;
+                    int crop_y = selected_detections[i].det.bbox.y;
+                    int crop_w = selected_detections[i].det.bbox.w;
+                    int crop_h = selected_detections[i].det.bbox.h;
+                    
+                    printf("%s: %.0f%%", &names[best_class], selected_detections[i].det.prob[best_class] * 100);
+                    image cropped_im = crop_image(im,
+                            round((crop_x - crop_w / 2)*im.w),
+                            round((crop_y - crop_h / 2)*im.h),
+                            round(crop_w*im.w), 
+                            round(crop_h*im.h));
+
+                    // 
+                    cv::Mat cr_img = image_to_mat2(cropped_im);
+                    cv::Mat sq_img;
+                    resize(cr_img, sq_img, Size(64, 64), (0, 0), (0, 0), cv::INTER_LINEAR);
+                    // sq_img.convertTo(sq_img, CV_32F, 1.0 / 255.0);
+                    torch::TensorOptions option(torch::kFloat32);
+                    at::Tensor current_input = torch::from_blob(sq_img.data, { 1, sq_img.channels(), sq_img.rows, sq_img.cols }, option);
+                    auto normalized_tensor = current_input.sub(torch::tensor({0.485, 0.456, 0.406})).div(torch::tensor({0.229, 0.224, 0.225}));
+                    at::Tensor current_encoder = head_model.forward({normalized_tensor}).toTensor();
+
+                    at::Tensor distance = torch::abs(torch::sub(anchor_encoder, current_encoder));
+                    at::Tensor y = tail_model.forward({distance}).toTensor();
+                    y = torch::sigmoid(y);
+                    float out = y[0].item().to<float>();
+                    std::cout << out << '\n';
+
+                    if (out > 0.5)
+                    {
+                        printf("matched");
+                        is_found = true;
+                    } else {
+                        printf("not matched");
+                    };
+
+                }
+            }
+            free(selected_detections);
+            free_detections(dets, nboxes);
+            free_image(im);
+            free_image(sized);
+                    
+            
             if (is_found)
             {
                 tracker->init(frame, bbox);
